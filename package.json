@@ -1,0 +1,16 @@
+{
+  "name": "stecamonitor",
+  "version": "1.0.0",
+  "description": "Monitor StecaGrid 2000 Inverter",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Rolf Bagge",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.17.1",
+    "fast-xml-parser": "^3.17.4",
+    "mongodb": "^3.6.2"
+  }
+}

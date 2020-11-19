@@ -1,0 +1,484 @@
+<html>
+
+<head>
+    <title>StecaMonitor</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@2.9.3/dist/Chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment@2.27.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment@0.1.1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@0.7.0"></script>
+</head>
+
+<body>
+    <h1>StecaMonitor</h1>
+
+    <div style="display: flex; flex-direction: column;">
+        <div>
+            <h2>Stats</h2>
+            <div style="padding-left: 1em;">Total power: <span id="totalPower"></span></div>
+        </div>
+
+        <div>
+            <h2>Indstillinger</h2>
+            <label style="padding-left: 1em;">
+                Dag: <input type="date" id="datePicker" />
+            </label>
+            <label style="padding-left: 1em;">Average Interval
+                <select id="interval">
+                    <option value="5" selected>5 min</option>
+                    <option value="15" selected>15 min</option>
+                    <option value="30">30 min</option>
+                    <option value="60">60 min</option>
+                </select>
+            </label>
+            <label style="padding-left: 1em;">AutoUpdate
+                <select id="autoUpdate">
+                    <option value="1" selected>1 sec</option>
+                    <option value="5" selected>5 sec</option>
+                    <option value="10">10 sec</option>
+                    <option value="60">1 min</option>
+                </select>
+            </label>
+
+        </div>
+
+        <div>
+
+            <h2>Energi</h2>
+
+            <div style="max-width: 54em; height: 32em; padding-left: 1em;">
+                <canvas id="produceChart"></canvas>
+            </div>
+
+        </div>
+
+        <div>
+
+            <h2>Effekt</h2>
+
+            <div style="max-width: 54em; height: 32em; padding-left: 1em;">
+                <canvas id="otherChart"></canvas>
+            </div>
+
+        </div>
+
+        <div>
+
+            <h2>Year</h2>
+
+            <div style="max-width: 54em; height: 32em; padding-left: 1em;">
+                <canvas id="yearChart"></canvas>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        Date.prototype.toDateInputValue = (function () {
+            var local = new Date(this);
+            local.setMinutes(this.getMinutes() - this.getTimezoneOffset());
+            return local.toJSON().slice(0, 10);
+        });
+
+        document.getElementById('datePicker').value = new Date().toDateInputValue();
+
+        //Unregister datalabels plugin as default
+        Chart.plugins.unregister(ChartDataLabels);
+
+        const produceCtx = document.getElementById('produceChart').getContext('2d');
+        const otherCtx = document.getElementById('otherChart').getContext('2d');
+        const yearCtx = document.getElementById('yearChart').getContext('2d');
+
+        let minuteFactor = 1000 * 60;
+
+        let hourFactor = minuteFactor * 60;
+
+        let dayFactor = hourFactor * 24;
+
+        let currentDay = Math.floor(Date.now() / dayFactor);
+
+        let tzOffset = new Date().getTimezoneOffset() * minuteFactor;
+
+        let dayStart = currentDay * dayFactor + tzOffset;
+        let dayEnd = dayStart + dayFactor - 1;
+
+        let optionsProduce = {
+            maintainAspectRatio: false,
+            plugins: {
+                datalabels: {
+                    formatter: function (value, context) {
+                        return formatPower(value.y);
+                    }
+                }
+            },
+            legend: {
+                display: false
+            },
+            tooltips: {
+                "enabled": false
+            },
+            scales: {
+                yAxes: [{
+                    ticks: {
+                        beginAtZero: true
+                    }
+                }],
+                xAxes: [{
+                    type: 'time',
+                    ticks: {
+                        min: dayStart,
+                        max: dayEnd
+                    },
+                    time: {
+                        unit: 'hour',
+                        timezone: 'Europe/Copenhagen',
+                        displayFormats: {
+                            hour: 'HH'
+                        }
+                    },
+                }]
+            }
+        };
+
+        let optionsOther = {
+            maintainAspectRatio: false,
+            elements: {
+                point: {
+                    radius: 0
+                }
+            },
+            tooltips: {
+                "enabled": false
+            },
+            legend: {
+                display: false
+            },
+            scales: {
+                yAxes: [{
+                    ticks: {
+                        beginAtZero: true
+                    }
+                }],
+                xAxes: [{
+                    type: 'time',
+                    ticks: {
+                        min: dayStart,
+                        max: dayEnd
+                    },
+                    time: {
+                        unit: 'hour',
+                        timezone: 'Europe/Copenhagen',
+                        displayFormats: {
+                            hour: 'HH'
+                        }
+                    },
+                }]
+            }
+        };
+
+        let optionsYear = {
+            maintainAspectRatio: false,
+            plugins: {
+                datalabels: {
+                    formatter: function (value, context) {
+                        if(value.y == 0) {
+                            return "";
+                        }
+                        return value.y + " kWh";
+                    }
+                }
+            },
+            legend: {
+                display: false
+            },
+            tooltips: {
+                "enabled": false
+            },
+            scales: {
+                yAxes: [{
+                    ticks: {
+                        beginAtZero: true
+                    }
+                }],
+                xAxes: [{
+                    type: 'time',
+                    time: {
+                        unit: 'month',
+                        timezone: 'Europe/Copenhagen',
+                        displayFormats: {
+                        }
+                    },
+                }]
+            }
+        };        
+
+        let produceChart = null;
+        let otherChart = null;
+        let yearChart = null;
+
+        let fetchTimer = null;
+        let fetchCounter = 0;
+
+        function formatPower(power) {
+            //Enters as wH
+            let unit = "Wh";
+
+            if (power > 100) {
+                power /= 1000.0;
+                unit = "kWh";
+            }
+
+            return power.toFixed(2) + " " + unit
+        }
+
+        function queueFetchPower() {
+            if (fetchTimer != null) {
+                window.clearTimeout(fetchTimer);
+            }
+
+            let autoUpdate = parseFloat(document.querySelector("#autoUpdate").value);
+
+            let autoUpdateWaitTime = 1000 * autoUpdate;
+
+            fetchTimer = setTimeout(() => {
+                fetchPower();
+            }, autoUpdateWaitTime);
+        }
+
+        function fetchPower() {
+            let day = Date.parse(document.querySelector("#datePicker").value) / dayFactor;
+
+            if(day > currentDay || isNaN(day)) {
+                //Unavailable date, skip
+                produceChart.data.datasets[0].data = [];
+                otherChart.data.datasets[0].data = [];
+
+                produceChart.update();
+                otherChart.update();
+
+                document.querySelector("#totalPower").innerHTML = formatPower(0);
+
+                return;
+            }
+
+            fetchCounter++;
+
+            let internalFetcher = fetchCounter;
+
+            fetch("/power?day=" + day).then((response) => {
+                if (internalFetcher !== fetchCounter) {
+                    return;
+                }
+
+                response.json().then((json) => {
+                    console.log(json);
+
+                    if (otherChart == null) {
+                        otherChart = new Chart(otherCtx, {
+                            type: 'line',
+                            data: {
+                                datasets: [
+                                    {
+                                        data: [],
+                                        borderColor: "rgba(0, 0, 255, 0.5)",
+                                        backgroundColor: "rgba(0, 0, 255, 0.1)",
+                                    }
+                                ]
+                            },
+                            options: optionsOther
+                        });
+                    }
+
+                    if (produceChart == null) {
+                        produceChart = new Chart(produceCtx, {
+                            type: 'bar',
+                            data: {
+                                datasets: [
+                                    {
+                                        datalabels: {
+                                            color: '#ffa200',
+                                            anchor: "end",
+                                            align: "end"
+                                        },
+                                        label: "Power",
+                                        data: [],
+                                        borderColor: "rgba(0, 0, 255, 0.5)",
+                                        backgroundColor: "rgba(0, 0, 255, 0.1)",
+                                        borderWidth: 1,
+                                        hoverBorderColor: "rgba(0, 0, 255, 1.0)"
+                                    }
+                                ]
+                            },
+                            plugins: [ChartDataLabels],
+                            options: optionsProduce
+                        });
+                    }
+
+                    produceChart.data.datasets[0].data = [];
+                    otherChart.data.datasets[0].data = [];
+
+                    let totalPower = 0;
+
+                    let timeMap = new Map();
+
+                    let interval = parseFloat(document.querySelector("#interval").value)
+
+                    let timeScale = minuteFactor * interval;
+
+                    let timeMin = 99999999999999999;
+                    let timeMax = 0;
+
+                    let avgWatt = -1;
+                    let alpha = 0.05;
+
+                    let otherCounter = 0;
+
+                    if (json != null && json.length > 0) {
+
+                        json.forEach((power) => {
+                            let time = Math.floor((power.lastUpdated - dayStart) / timeScale);
+
+                            let timePower = timeMap.get(time);
+
+                            if (timePower == null) {
+                                timePower = 0;
+                            }
+
+                            timePower += power.power;
+
+                            totalPower += power.power;
+
+                            timeMap.set(time, timePower);
+
+                            timeMin = Math.min(timeMin, power.lastUpdated);
+                            timeMax = Math.max(timeMax, power.lastUpdated);
+
+                            if (avgWatt === -1) {
+                                avgWatt = power.watt;
+                            } else {
+                                avgWatt = (1.0 - alpha) * avgWatt + alpha * power.watt;
+                            }
+
+                            if (otherCounter === 0) {
+                                otherChart.data.datasets[0].data.push({
+                                    t: power.lastUpdated,
+                                    y: avgWatt
+                                });
+                            }
+
+                            otherCounter = (otherCounter + 1) % 60;
+                        });
+
+                        timeMap.forEach((power, time) => {
+                            produceChart.data.datasets[0].data.push({
+                                t: dayStart + time * timeScale + timeScale / 2.0,
+                                y: power
+                            });
+                        });
+
+                        timeMin = Math.floor(timeMin / hourFactor) * hourFactor - hourFactor;
+                        timeMax = Math.floor(timeMax / hourFactor) * hourFactor + hourFactor * 2;
+
+                        produceChart.options.scales.xAxes[0].ticks.min = timeMin;
+                        produceChart.options.scales.xAxes[0].ticks.max = timeMax;
+
+                        otherChart.options.scales.xAxes[0].ticks.min = timeMin;
+                        otherChart.options.scales.xAxes[0].ticks.max = timeMax;
+                    }
+
+                    produceChart.update();
+                    otherChart.update();
+
+                    document.querySelector("#totalPower").innerHTML = formatPower(totalPower);
+
+                    queueFetchPower();
+                });
+            }).catch((e) => {
+                //Somethint went wrong
+                console.warn(e);
+                queueFetchPower();
+            });
+        }
+
+        fetchPower();
+
+        document.querySelector("#interval").addEventListener("input", () => {
+            fetchPower();
+        });
+
+        document.querySelector("#autoUpdate").addEventListener("input", () => {
+            queueFetchPower();
+        });
+
+        document.querySelector("#datePicker").addEventListener("input", () => {
+            fetchPower();
+        });
+
+        const MONTH_NAMES = ["Januar", "Februar", "Marts", "April", "Maj", "Juni", "Juli", "August", "September", "Oktober", "November", "December"];
+
+        function fetchYear() {
+            let year = new Date().getFullYear();
+
+            fetch("/year?year=" + year).then((response) => {
+                response.json().then((json)=>{
+                    if (yearChart == null) {
+                        yearChart = new Chart(yearCtx, {
+                            type: 'bar',
+                            data: {
+                                datasets: [
+                                    {
+                                        datalabels: {
+                                            color: '#ffa200',
+                                            anchor: "end",
+                                            align: "end"
+                                        },
+                                        data: [],
+                                        borderColor: "rgba(0, 0, 255, 0.5)",
+                                        backgroundColor: "rgba(0, 0, 255, 0.1)",
+                                    }
+                                ]
+                            },
+                            plugins: [ChartDataLabels],
+                            options: optionsYear
+                        });
+                    }
+
+                    yearChart.data.datasets[0].data = [];
+
+                    for(let monthTimestamp = year*12; monthTimestamp<= year*12+11; monthTimestamp++) {
+                        let foundMonth = json.find((m)=>{
+                            return m.month === monthTimestamp;
+                        });
+
+                        let date = new Date();
+                        date.setDate(1);
+                        date.setMonth(monthTimestamp % year);
+                        date.setHours(0,0,0);
+                        date.setMilliseconds(0);
+
+                        if(foundMonth == null) {
+                            yearChart.data.datasets[0].data.push({
+                                x: date.getTime(),
+                                y: 0
+                            });
+                        } else {
+                            yearChart.data.datasets[0].data.push({
+                                x: date.getTime(),
+                                y: (foundMonth.wattHours / 1000.0).toFixed(2)
+                            });
+                        }
+                    }
+
+                    yearChart.update();
+                });
+            }).catch((e)=>{
+
+            });
+
+        }
+
+        fetchYear();
+    </script>
+</body>
+
+</html>
