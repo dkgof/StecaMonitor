@@ -292,5 +292,3 @@ MongoClient.connect(mongoUrl,{ useUnifiedTopology: true }, (err, db)=>{
 
     requestData();
 });
-
-//TEST
