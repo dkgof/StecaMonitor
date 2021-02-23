@@ -65,7 +65,9 @@
         <div>
 
             <h2>Year</h2>
-
+            <label style="padding-left: 1em;">
+                År: <input type="number" id="yearPicker" />
+            </label>
             <div style="max-width: 54em; height: 32em; padding-left: 1em;">
                 <canvas id="yearChart"></canvas>
             </div>
@@ -81,6 +83,7 @@
         });
 
         document.getElementById('datePicker').value = new Date().toDateInputValue();
+        document.getElementById('yearPicker').value = new Date().getFullYear();
 
         //Unregister datalabels plugin as default
         Chart.plugins.unregister(ChartDataLabels);
@@ -414,10 +417,14 @@
             fetchPower();
         });
 
+        document.querySelector("#yearPicker").addEventListener("input", () => {
+            fetchYear();
+        });
+
         const MONTH_NAMES = ["Januar", "Februar", "Marts", "April", "Maj", "Juni", "Juli", "August", "September", "Oktober", "November", "December"];
 
         function fetchYear() {
-            let year = new Date().getFullYear();
+            let year = document.getElementById('yearPicker').value;
 
             fetch("/year?year=" + year).then((response) => {
                 response.json().then((json)=>{
